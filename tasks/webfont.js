@@ -85,7 +85,9 @@ module.exports = function(grunt) {
 			logger: logger,
 			fontHeight: options.fontHeight || 512,
 			descent: options.descent || 64,
-			ascent: options.ascent || 448
+			ascent: options.ascent || 448,
+			comment: options.comment,
+			copyright: options.copyright
 		};
 
 		o = _.extend(o, {

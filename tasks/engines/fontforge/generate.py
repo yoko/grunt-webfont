@@ -14,14 +14,18 @@ f = fontforge.font()
 f.encoding = 'UnicodeFull'
 f.design_size = 16
 f.em = args['fontHeight']
-f.ascent = args['ascent']
-f.descent = args['descent']
+f.comment = args['comment']
+f.copyright = args['copyright']
+# [IE] https://github.com/FontCustom/fontcustom/issues/197#issuecomment-38599583
+f.os2_version = 3
+f.hhea_linegap = 0
+
 if args['normalize']:
 	f.autoWidth(0, 0, args['fontHeight'])
 
 m = hashlib.md5()
 
-KERNING = 15
+# KERNING = 15
 
 
 def empty_char(f, c):
