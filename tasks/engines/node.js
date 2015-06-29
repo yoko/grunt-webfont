@@ -19,7 +19,8 @@ module.exports = function(o, allDone) {
 	var svg2ttf = require('svg2ttf');
 	var ttf2woff = require('ttf2woff');
 	var ttf2eot = require('ttf2eot');
-	var md5 = require('crypto').createHash('md5');
+	var SVGO = require('svgo');
+	var MemoryStream = require('memorystream');
 	var logger = o.logger || require('winston');
 	var wf = require('../util/util');
 
@@ -31,24 +32,23 @@ module.exports = function(o, allDone) {
 		svg: function(done) {
 			var font = '';
 			var decoder = new StringDecoder('utf8');
-			var stream = svgicons2svgfont(svgFilesToStreams(o.files), {
-				fontName: o.fontName,
-				fontHeight: o.fontHeight,
-				descent: o.descent,
-				normalize: o.normalize,
-				log: logger.verbose.bind(logger),
-				error: logger.error.bind(logger)
-			});
-			stream.on('data', function(chunk) {
-				font += decoder.write(chunk);
-			});
-			stream.on('end', function() {
-				fonts.svg = font;
-				if (o.addHashes) {
-					md5.update(font);
-					o.fontName += '-' + md5.digest('hex');
-				}
-				done(font);
+			svgFilesToStreams(o.files, function(streams) {
+				var stream = svgicons2svgfont(streams, {
+					fontName: o.fontName,
+					fontHeight: o.fontHeight,
+					descent: o.descent,
+					normalize: o.normalize,
+					round: o.round,
+					log: logger.verbose.bind(logger),
+					error: logger.error.bind(logger)
+				});
+				stream.on('data', function(chunk) {
+					font += decoder.write(chunk);
+				});
+				stream.on('end', function() {
+					fonts.svg = font;
+					done(font);
+				});
 			});
 		},
 
@@ -76,6 +76,11 @@ module.exports = function(o, allDone) {
 			});
 		},
 
+		woff2: function(done) {
+			// Will be converted from TTF later
+			done();
+		},
+
 		eot: function(done) {
 			getFont('ttf', function(ttfFont) {
 				var font = ttf2eot(new Uint8Array(ttfFont));
@@ -89,14 +94,14 @@ module.exports = function(o, allDone) {
 	var steps = [];
 
 	// Font types
-	o.types.forEach(function(type) {
+	var typesToGenerate = o.types.slice();
+	if (o.types.indexOf('woff2') !== -1 && o.types.indexOf('ttf'  === -1)) typesToGenerate.push('ttf');
+	typesToGenerate.forEach(function(type) {
 		steps.push(createFontWriter(type));
 	});
 
-	steps.push(allDone);
-
 	// Run!
-	async.waterfall(steps);
+	async.waterfall(steps, allDone);
 
 	function getFont(type, done) {
 		if (fonts[type]) {
@@ -110,20 +115,41 @@ module.exports = function(o, allDone) {
 	function createFontWriter(type) {
 		return function(done) {
 			getFont(type, function(font) {
-				fs.writeFileSync(getFontPath(type), font);
+				fs.writeFileSync(wf.getFontPath(o, type), font);
 				done();
 			});
 		};
 	}
 
-	function svgFilesToStreams(files) {
-		return files.map(function(file, idx) {
-			var name = o.glyphs[idx];
-			return {
-				codepoint: o.codepoints[name],
-				name: name,
-				stream: fs.createReadStream(file)
-			};
+	function svgFilesToStreams(files, done) {
+		async.map(files, function(file, fileDone) {
+			var svg = fs.readFileSync(file, 'utf8');
+			var svgo = new SVGO();
+			try {
+				svgo.optimize(svg, function(res) {
+					var idx = files.indexOf(file);
+					var name = o.glyphs[idx];
+					var stream = new MemoryStream(res.data, {
+						writable: false
+					});
+					fileDone(null, {
+						codepoint: o.codepoints[name],
+						name: name,
+						stream: stream
+					});
+				});
+			}
+			catch(err) {
+				fileDone(err);
+			}
+		}, function(err, streams) {
+			if (err) {
+				logger.error('Can’t simplify SVG file with SVGO.\n\n' + err);
+				allDone(false);
+			}
+			else {
+				done(streams);
+			}
 		});
 	}
 
@@ -169,10 +195,6 @@ module.exports = function(o, allDone) {
 			var hintedFont = fs.readFileSync(hintedFilepath);
 			done(hintedFont);
 		});
-	}
-
-	function getFontPath(type) {
-		return path.join(o.dest, o.fontName + '.' + type);
 	}
 
 };

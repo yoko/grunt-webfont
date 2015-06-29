@@ -4,6 +4,9 @@
  * @author Artem Sapegin (http://sapegin.me)
  */
 
+var path = require('path');
+var glob = require('glob');
+
 var exports = {};
 
 /**
@@ -35,6 +38,14 @@ exports.fontsSrcsMap = {
 			embeddable: true
 		},
 	],
+	woff2: [
+		false,
+		{
+			ext: '.woff2',
+			format: 'woff2',
+			embeddable: true
+		},
+	],
 	ttf: [
 		false,
 		{
@@ -46,7 +57,7 @@ exports.fontsSrcsMap = {
 	svg: [
 		false,
 		{
-			ext: '.svg?#{fontBaseName}',
+			ext: '.svg#{fontBaseName}',
 			format: 'svg'
 		},
 	]
@@ -75,14 +86,29 @@ exports.fontSrcSeparators = {
  * List of available font formats.
  * @type {String}
  */
-exports.fontFormats = 'eot,woff,ttf,svg';
+exports.fontFormats = 'eot,woff2,woff,ttf,svg';
 
 /**
- * Glob mask for all available font formats.
- * @type {String}
+ * Returns list of all generated font files.
+ *
+ * @param {Object} o Options.
+ * @return {Array}
  */
-exports.fontFileMask = '*.{' + exports.fontFormats + '}';
+exports.generatedFontFiles = function(o) {
+ 	var mask = '*.{' + o.types + '}';
+	return glob.sync(path.join(o.dest, o.fontFilename + mask));
+};
 
+/**
+ * Returns path to font of specified format.
+ *
+ * @param {Object} o Options.
+ * @param {String} type Font type (see `wf.fontFormats`).
+ * @return {String}
+ */
+exports.getFontPath = function(o, type) {
+	return path.join(o.dest, o.fontFilename + '.' + type);
+};
 
 // Expose
 module.exports = exports;

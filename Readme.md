@@ -1,9 +1,9 @@
 # SVG to webfont converter for Grunt
 
-[![Build Status](https://travis-ci.org/sapegin/grunt-webfont.png)](https://travis-ci.org/sapegin/grunt-webfont)
-[![Built with Grunt](https://cdn.gruntjs.com/builtwith.png)](http://gruntjs.com/)
+[![Build Status](https://travis-ci.org/sapegin/grunt-webfont.svg)](https://travis-ci.org/sapegin/grunt-webfont)
+[![Downloads on npm](http://img.shields.io/npm/dm/grunt-webfont.svg?style=flat)](https://www.npmjs.com/package/grunt-webfont)
 
-Generate custom icon webfonts from SVG files via Grunt. Based on [Font Custom](http://endtwist.github.com/fontcustom/).
+Generate custom icon webfonts from SVG files via Grunt. Based on [Font Custom](http://fontcustom.com/).
 
 This task will make all you need to use font-face icon on your website: font in all needed formats, CSS/Sass/LESS/Stylus and HTML demo page.
 
@@ -11,6 +11,7 @@ This task will make all you need to use font-face icon on your website: font in 
 
 * Works on Mac, Windows and Linux.
 * Very flexible.
+* Supports all web font formats: WOFF, [WOFF2](https://github.com/sapegin/grunt-webfont/wiki/WOFF2-support), EOT, TTF and SVG.
 * Semantic: uses [Unicode private use area](http://bit.ly/ZnkwaT).
 * [Cross-browser](http://www.fontspring.com/blog/further-hardening-of-the-bulletproof-syntax/): IE8+.
 * BEM or Bootstrap output CSS style.
@@ -23,7 +24,7 @@ This task will make all you need to use font-face icon on your website: font in 
 
 ## Installation
 
-This plugin requires Grunt 0.4. Note that `ttfautohint` is optional, but your generated font will not be properly hinted if it’s not installed.
+This plugin requires Grunt 0.4. Note that `ttfautohint` is optional, but your generated font will not be properly hinted if it’s not installed. And make sure you don’t use `ttfautohint` 0.97 because that version won’t work.
 
 ### OS X
 
@@ -36,6 +37,8 @@ npm install grunt-webfont --save-dev
 
 *`fontforge` isn’t required for `node` engine (see below).*
 
+:skull: [Notes on experimental WOFF2 support](https://github.com/sapegin/grunt-webfont/wiki/WOFF2-support).
+
 ### Linux
 
 ```
@@ -44,6 +47,8 @@ npm install grunt-webfont --save-dev
 ```
 
 *`fontforge` isn’t required for `node` engine (see below).*
+
+:skull: [Notes on experimental WOFF2 support](https://github.com/sapegin/grunt-webfont/wiki/WOFF2-support).
 
 ### Windows
 
@@ -73,7 +78,7 @@ There are two font rendering engines available. See also `engine` option below.
 * You have to install `fontforge`.
 * Really weird bugs sometimes.
 
-### node :skull: experimental :skull:
+### node
 
 #### Pros
 
@@ -83,7 +88,7 @@ There are two font rendering engines available. See also `engine` option below.
 #### Cons
 
 * Doesn’t work with some SVG files.
-* Ligatures don’t supported.
+* Ligatures aren’t supported.
 
 
 ## Configuration
@@ -123,13 +128,13 @@ All options should be inside `options` object:
 
 ``` javascript
 webfont: {
-  icons: {
-    src: 'icons/*.svg',
-    dest: 'build/fonts',
-    options: {
-      ...
-    }
-  }
+	icons: {
+		src: 'icons/*.svg',
+		dest: 'build/fonts',
+		options: {
+			...
+		}
+	}
 }
 ```
 
@@ -138,6 +143,20 @@ webfont: {
 Type: `string` Default: `icons`
 
 Name of font and base name of font files.
+
+#### fontFilename
+
+Type: `string` Default: Same as `font` option
+
+Filename for generated font files, you can add placeholders for the same data that gets passed to the [template](#template).
+
+For example, to get the hash to be part of the filenames:
+
+```js
+options: {
+	fontFilename: 'icons-{hash}'
+}
+```
 
 #### hashes
 
@@ -153,9 +172,11 @@ List of styles to be added to CSS files: `font` (`font-face` declaration), `icon
 
 #### types
 
-Type: `string|array` Default: `'eot,woff,ttf'`
+Type: `string|array` Default: `'eot,woff,ttf'`, available: `'eot,woff2,woff,ttf,svg'`
 
 Font files types to generate.
+
+:skull: [Notes on experimental WOFF2 support](https://github.com/sapegin/grunt-webfont/wiki/WOFF2-support).
 
 #### order
 
@@ -181,7 +202,7 @@ For example, your Gruntfile:
 
 ```js
 options: {
-  template: 'my_templates/tmpl.css'
+	template: 'my_templates/tmpl.css'
 }
 ```
 
@@ -189,8 +210,8 @@ options: {
 
 ```css
 @font-face {
-  font-family:"<%= fontBaseName %>";
-  ...
+	font-family:"<%= fontBaseName %>";
+	...
 }
 ...
 ```
@@ -199,10 +220,30 @@ options: {
 
 ```json
 {
-  "baseClass": "icon",
-  "classPrefix": "icon_"
+	"baseClass": "icon",
+	"classPrefix": "icon_"
 }
 ```
+
+Some extra data is available for you in templates:
+
+* `hash`: a unique string to flush browser cache. Available even if `hashes` option is `false`.
+
+* `fontRawSrcs`: array of font-face’s src values not merged to a single line:
+
+```
+[
+	[
+		'url("icons.eot")'
+	],
+	[
+		'url("icons.eot?#iefix") format("embedded-opentype")',
+		'url("icons.woff") format("woff")',
+		'url("icons.ttf") format("truetype")'
+	]
+]
+```
+
 
 #### templateOptions
 
@@ -222,7 +263,7 @@ options: {
 
 #### stylesheet
 
-Type: `string` Default: `'css'`
+Type: `string` Default: `'css'` or extension of `template`
 
 Stylesheet type. Can be css, sass, scss, less... If `sass` or `scss` is used, `_` will prefix the file (so it can be a used as a partial).
 
@@ -278,10 +319,10 @@ For example you can group your icons into several folders and add folder name to
 
 ```js
 options: {
-  rename: function(name) {
-    // .icon_entypo-add, .icon_fontawesome-add, etc.
-    return [path.basename(path.dirname(name)), path.basename(name)].join('-');
-  }
+	rename: function(name) {
+		// .icon_entypo-add, .icon_fontawesome-add, etc.
+		return [path.basename(path.dirname(name)), path.basename(name)].join('-');
+	}
 }
 ```
 
@@ -297,7 +338,7 @@ options: {
 }
 ```
 
-#### engine :skull: experimental :skull:
+#### engine
 
 Type: `string` Default: `fontforge`
 
@@ -309,7 +350,7 @@ Type: `boolean` Default: `false`
 
 Adds IE7 support using a `*zoom: expression()` hack.
 
-#### startCodepoint
+#### startCodepoint
 
 Type: `integer` Default: `0xF101`
 
@@ -324,10 +365,17 @@ Specific codepoints to use for certain glyphs. Any glyphs not specified in the c
 ```javascript
 options: {
 	codepoints: {
-	  single: 0xE001
+		single: 0xE001
 	}
 }
 ```
+
+#### codepointsFile
+Type: `string` Default: `null`
+
+Uses and Saves the codepoint mapping by name to this file.
+
+NOTE: will overwrite the set codepoints option.
 
 #### autoHint
 
@@ -335,17 +383,37 @@ Type: `boolean` Default: `true`
 
 Enables font auto hinting using `ttfautohint`.
 
+#### round
+
+Type: `number` Default: `10e12`
+
+Setup SVG path rounding.
+
 #### fontHeight
 
 Type: `number` Default: `512`
+
+The output font height.
 
 #### descent
 
 Type: `number` Default: `64`
 
-#### ascent
+The font descent. The descent should be a positive value. The ascent formula is: `ascent = fontHeight - descent`.
 
-Type: `number` Default: `448`
+#### callback
+
+Type: `function` Default: `null`
+
+Allows for a callback to be called when the task has completed and passes in the filename of the generated font, an array of the various font types created, an array of all the glyphs created and the hash used to flush browser cache.
+
+```javascript
+options: {
+	callback: function(filename, types, glyphs, hash) {
+		// ...
+	}
+}
+````
 
 ### Config Examples
 
@@ -353,10 +421,10 @@ Type: `number` Default: `448`
 
 ```javascript
 webfont: {
-  icons: {
-    src: 'icons/*.svg',
-    dest: 'build/fonts'
-  }
+	icons: {
+		src: 'icons/*.svg',
+		dest: 'build/fonts'
+	}
 }
 ```
 
@@ -364,14 +432,14 @@ webfont: {
 
 ```javascript
 webfont: {
-  icons: {
-    src: 'icons/*.svg',
-    dest: 'build/fonts',
-    destCss: 'build/fonts/css',
-    options: {
-      font: 'ponies'
-    }
-  }
+	icons: {
+		src: 'icons/*.svg',
+		dest: 'build/fonts',
+		destCss: 'build/fonts/css',
+		options: {
+			font: 'ponies'
+		}
+	}
 }
 ```
 
@@ -379,16 +447,18 @@ webfont: {
 
 ```js
 webfont: {
-  icons: {
-    src: 'icons/*.svg',
-    dest: 'build/fonts',
-    syntax: 'bem',
-    templateOptions: {
-        baseClass: 'glyph-icon',
-        classPrefix: 'glyph_',
-        mixinPrefix: 'glyph-'
-    }
-  }
+	icons: {
+		src: 'icons/*.svg',
+		dest: 'build/fonts',
+		options: {
+			syntax: 'bem',
+			templateOptions: {
+				baseClass: 'glyph-icon',
+				classPrefix: 'glyph_',
+				mixinPrefix: 'glyph-'
+			}
+		}
+	}
 }
 ```
 
@@ -396,15 +466,15 @@ webfont: {
 
 ```javascript
 webfont: {
-  icons: {
-    src: 'icons/*.svg',
-    dest: 'build/fonts',
-    destCss: 'build/styles',
-    options: {
-      stylesheet: 'styl',
-      relativeFontPath: '/build/fonts'
-    }
-  }
+	icons: {
+		src: 'icons/*.svg',
+		dest: 'build/fonts',
+		destCss: 'build/styles',
+		options: {
+			stylesheet: 'styl',
+			relativeFontPath: '/build/fonts'
+		}
+	}
 }
 ```
 
@@ -412,14 +482,14 @@ webfont: {
 
 ```javascript
 webfont: {
-  icons: {
-    src: 'icons/*.svg',
-    dest: 'build/fonts',
-    options: {
-      types: 'woff',
-      embed: true
-    }
-  }
+	icons: {
+		src: 'icons/*.svg',
+		dest: 'build/fonts',
+		options: {
+			types: 'woff',
+			embed: true
+		}
+	}
 }
 ```
 
@@ -439,20 +509,20 @@ The LESS mixins then may be used like so:
 
 ```css
 .profile-button {
-  .icon-profile;
+	.icon-profile;
 }
 ```
 
 ## Changelog
 
-The changelog can be found in the `Changelog.md` file.
+The changelog can be found in the [Changelog.md](Changelog.md) file.
 
 ## Troubleshooting
 
-##### I have problems displaying the font in Firefox
+### I have problems displaying the font in Firefox
 
 Firefox doesn’t allow cross-domain fonts: [Specifications](http://www.w3.org/TR/css3-fonts/#font-fetching-requirements), [Bugzilla Ticket](https://bugzilla.mozilla.org/show_bug.cgi?id=604421), [How to fix it](https://coderwall.com/p/v4uwyq).
 
 ## License
 
-The MIT License, see the included `License.md` file.
+The MIT License, see the included [License.md](License.md) file.

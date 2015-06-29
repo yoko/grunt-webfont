@@ -12,7 +12,6 @@ module.exports = function(o, allDone) {
 	var path = require('path');
 	var temp = require('temp');
 	var async = require('async');
-	var glob = require('glob');
 	var exec = require('exec');
 	var chalk = require('chalk');
 	var _ = require('lodash');
@@ -43,8 +42,9 @@ module.exports = function(o, allDone) {
 
 			// Skip some fontforge output such as copyrights. Show warnings only when no font files was created
 			// or in verbose mode.
-			var success = !!generatedFontFiles();
+			var success = !!wf.generatedFontFiles(o);
 			var notError = /(Copyright|License |with many parts BSD |Executable based on sources from|Library based on sources from|Based on source from git)/;
+			var version = /(Executable based on sources from|Library based on sources from)/;
 			var lines = err.split('\n');
 
 			var warn = [];
@@ -73,9 +73,10 @@ module.exports = function(o, allDone) {
 		catch (e) {
 			logger.verbose('Webfont did not receive a proper JSON result from Python script: ' + e);
 			return error(
-				'Something went wrong when running fontforge. Probably one of your SVGs is too complicated for fontforge.\n\n' +
-				'1. Try to use “node” engine instead of “fontforge”. (See “engine” option in the Readme.)\n\n' +
-				'2. To find “bad” icon try to remove SVGs one by one until error disappears. Then try to simplify this SVG in Sketch, Illustrator, etc.\n\n'
+				'Something went wrong when running fontforge. Probably fontforge wasn’t installed correctly or one of your SVGs is too complicated for fontforge.\n\n' +
+				'1. Try to run Grunt in verbose mode: ' + chalk.bold('grunt --verbose webfont') + ' and see what fontforge says. Then search GitHub issues for the solution: ' + chalk.underline('https://github.com/sapegin/grunt-webfont/issues') + '.\n\n' +
+				'2. Try to use “node” engine instead of “fontforge”: ' + chalk.underline('https://github.com/sapegin/grunt-webfont#engine') + '\n\n' +
+				'3. To find “bad” icon try to remove SVGs one by one until error disappears. Then try to simplify this SVG in Sketch, Illustrator, etc.\n\n'
 			);
 		}
 
@@ -97,10 +98,6 @@ module.exports = function(o, allDone) {
 	proc.stdin.write(JSON.stringify(params));
 	proc.stdin.end();
 
-	function generatedFontFiles() {
-		return glob.sync(path.join(o.dest, o.fontBaseName + wf.fontFileMask));
-	}
-
 	function error() {
 		logger.error.apply(null, arguments);
 		allDone(false);
@@ -108,7 +105,7 @@ module.exports = function(o, allDone) {
 	}
 
 	function fontforgeNotFound() {
-		error('fontforge not found. Please install fontforge and all other requirements.');
+		error('fontforge not found. Please install fontforge and all other requirements: ' + chalk.underline('https://github.com/sapegin/grunt-webfont#installation'));
 	}
 
 };

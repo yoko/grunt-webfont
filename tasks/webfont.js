@@ -10,14 +10,15 @@ module.exports = function(grunt) {
 
 	var fs = require('fs');
 	var path = require('path');
+	var exec = require('exec');
 	var async = require('async');
 	var glob = require('glob');
 	var chalk = require('chalk');
 	var mkdirp = require('mkdirp');
+	var crypto = require('crypto');
 	var _ = require('lodash');
 	var _s = require('underscore.string');
 	var wf = require('./util/util');
-
 
 	grunt.registerMultiTask('webfont', 'Compile separate SVG files to webfont', function() {
 		['src', 'dest'].forEach(function(name) {
@@ -26,7 +27,8 @@ module.exports = function(grunt) {
 
 		var allDone = this.async();
 		var params = this.data;
-		var options = params.options || {};
+		var options = this.options();
+		var md5 = crypto.createHash('md5');
 
 		/**
 		 * Winston to Grunt logger adapter.
@@ -47,7 +49,7 @@ module.exports = function(grunt) {
 		};
 
 		if (options.skip) {
-			allDone();
+			completeTask();
 			return;
 		}
 
@@ -55,10 +57,13 @@ module.exports = function(grunt) {
 		var files = _.filter(this.filesSrc, isSvgFile);
 		if (!files.length) {
 			logger.warn('Specified empty list of source SVG files.');
+			completeTask();
+			return;
 		}
 
 		// Options
 		var o = {
+			logger: logger,
 			fontBaseName: options.font || 'icons',
 			destCss: params.destCss || params.dest,
 			dest: params.dest,
@@ -68,24 +73,26 @@ module.exports = function(grunt) {
 			template: options.template,
 			syntax: options.syntax || 'bem',
 			templateOptions: options.templateOptions || {},
-			stylesheet: options.stylesheet || 'css',
+			stylesheet: options.stylesheet || path.extname(options.template).replace(/^\./, '') || 'css',
 			htmlDemo: options.htmlDemo !== false,
 			htmlDemoTemplate: options.htmlDemoTemplate,
 			styles: optionToArray(options.styles, 'font,icon'),
-			types: optionToArray(options.types, wf.fontFormats),
+			types: optionToArray(options.types, 'eot,woff,ttf'),
 			order: optionToArray(options.order, wf.fontFormats),
 			embed: options.embed === true ? ['woff'] : optionToArray(options.embed, false),
 			rename: options.rename || path.basename,
 			engine: options.engine || 'fontforge',
 			autoHint: options.autoHint !== false,
 			codepoints: options.codepoints,
+			codepointsFile: options.codepointsFile,
 			startCodepoint: options.startCodepoint || wf.UNICODE_PUA_START,
 			ie7: options.ie7 === true,
-			normalize: options.normalize !== false,
-			logger: logger,
-			fontHeight: options.fontHeight || 512,
-			descent: options.descent || 64,
-			ascent: options.ascent || 448,
+			normalize: options.normalize === true,
+			round: options.round !== undefined ? options.round : 10e12,
+			fontHeight: options.fontHeight !== undefined ? options.fontHeight : 512,
+			descent: options.descent !== undefined ? options.descent : 64,
+			cache: options.cache || path.join(__dirname, '..', '.cache'),
+			callback: options.callback
 			comment: options.comment,
 			copyright: options.copyright
 		};
@@ -100,6 +107,9 @@ module.exports = function(grunt) {
 			glyphs: []
 		});
 
+		o.hash = getHash();
+		o.fontFilename = template(options.fontFilename || o.fontBaseName, o);
+
 		// “Rename” files
 		o.glyphs = o.files.map(function(file) {
 			return o.rename(file).replace(path.extname(file), '');
@@ -109,22 +119,88 @@ module.exports = function(grunt) {
 		// @todo Codepoint can be a Unicode code or character.
 		var currentCodepoint = o.startCodepoint;
 		if (!o.codepoints) o.codepoints = {};
+		if (o.codepointsFile) o.codepoints = readCodepointsFromFile();
 		o.glyphs.forEach(function(name) {
 			if (!o.codepoints[name]) {
 				o.codepoints[name] = getNextCodepoint();
 			}
 		});
+		if (o.codepointsFile) saveCodepointsToFile();
 
-		// Run!
+		// Check if we need to generate font
+		var previousHash = readHash(this.name, this.target);
+		logger.verbose('New hash:', o.hash, '- previous hash:', previousHash);
+		if (o.hash === previousHash) {
+			logger.verbose('Config and source files weren’t changed since last run, checking resulting files...');
+			var regenerationNeeded = false;
+
+			var generatedFiles = wf.generatedFontFiles(o);
+			if (!generatedFiles.length){
+				regenerationNeeded = true;
+			}
+			else {
+				generatedFiles.push(getDemoFilePath());
+				generatedFiles.push(getCssFilePath());
+
+				regenerationNeeded = _.some(generatedFiles, function(filename) {
+					if (!filename) return false;
+					if (!fs.existsSync(filename)) {
+						logger.verbose('File', filename, ' is missed.');
+						return true;
+					}
+					return false;
+				});
+			}
+			if (!regenerationNeeded) {
+				logger.log('Font ' + chalk.cyan(o.fontName) + ' wasn’t changed since last run.');
+				completeTask();
+				return;
+			}
+		}
+
+		// Save new hash and run
+		saveHash(this.name, this.target, o.hash);
 		async.waterfall([
 			createOutputDirs,
 			cleanOutputDir,
 			generateFont,
+			generateWoff2Font,
 			generateStylesheet,
 			generateDemoHtml,
 			printDone
-		], allDone);
+		], completeTask);
 
+		/**
+		 * Call callback function if it was specified in the options.
+		 */
+		function completeTask() {
+			if (o && _.isFunction(o.callback)) {
+				o.callback(o.fontName, o.types, o.glyphs, o.hash);
+			}
+			allDone();
+		}
+
+		/**
+		 * Calculate hash to flush browser cache.
+		 * Hash is based on source SVG files contents, task options and grunt-webfont version.
+		 *
+		 * @return {String}
+		 */
+		function getHash() {
+			// Source SVG files contents
+			o.files.forEach(function(file) {
+				md5.update(fs.readFileSync(file, 'utf8'));
+			});
+
+			// Options
+			md5.update(JSON.stringify(o));
+
+			// grunt-webfont version
+			var packageJson = require('../package.json');
+			md5.update(packageJson.version);
+
+			return md5.digest('hex');
+		}
 
 		/**
 		 * Create output directory
@@ -144,7 +220,7 @@ module.exports = function(grunt) {
 		 */
 		function cleanOutputDir(done) {
 			var htmlDemoFileMask = path.join(o.destCss, o.fontBaseName + '*.{' + o.stylesheet + ',html}');
-			var files = glob.sync(htmlDemoFileMask).concat(generatedFontFiles());
+			var files = glob.sync(htmlDemoFileMask).concat(wf.generatedFontFiles(o));
 			async.forEach(files, function(file, next) {
 				fs.unlink(file, next);
 			}, done);
@@ -160,11 +236,54 @@ module.exports = function(grunt) {
 			engine(o, function(result) {
 				if (result === false) {
 					// Font was not created, exit
-					allDone();
+					completeTask();
+					return;
 				}
 
 				if (result) {
 					o = _.extend(o, result);
+				}
+
+				done();
+			});
+		}
+
+		/**
+		 * Converts TTF font to WOFF2.
+		 *
+		 * @param {Function} done
+		 */
+		function generateWoff2Font(done) {
+			if (!has(o.types, 'woff2')) {
+				done();
+				return;
+			}
+
+			// Run woff2_compress
+			var ttfFont = wf.getFontPath(o, 'ttf');
+			var args = [
+				'woff2_compress',
+				ttfFont
+			];
+
+			exec(args, function(err, out, code) {
+				if (err) {
+					if (err instanceof Error) {
+						if (err.code === 'ENOENT') {
+							logger.error('woff2_compress not found. It is required for creating WOFF2 fonts.');
+							done();
+							return;
+						}
+						err = err.message;
+					}
+					logger.error('Can’t run woff2_compress.\n\n' + err);
+					done();
+					return;
+				}
+
+				// Remove TTF font if not needed
+				if (!has(o.types, 'ttf')) {
+					fs.unlinkSync(ttfFont);
 				}
 
 				done();
@@ -200,6 +319,7 @@ module.exports = function(grunt) {
 				// o.fontSrc1, o.fontSrc2
 				o['fontSrc'+(idx+1)] = font.join(fontSrcSeparator);
 			});
+			o.fontRawSrcs = fontSrcs;
 
 			// Convert codepoints to array of strings
 			var codepoints = [];
@@ -219,9 +339,8 @@ module.exports = function(grunt) {
 			if (o.templateOptions) o = _.extend(o, o.templateOptions);
 
 			// Generate CSS
-			o.cssTemplate = readTemplate(o.template, o.syntax, '.css');
-			var cssFilePrefix = option(wf.cssFilePrefixes, o.stylesheet);
-			var cssFile = path.join(o.destCss, cssFilePrefix + o.fontBaseName + '.' + o.stylesheet);
+			var ext = path.extname(o.template) || '.css';  // Use extension of o.template file if given, or default to .css
+			o.cssTemplate = readTemplate(o.template, o.syntax, ext);
 			var cssContext = _.extend(o, {
 				iconsStyles: true
 			});
@@ -234,9 +353,39 @@ module.exports = function(grunt) {
 			}
 
 			// Save file
-			fs.writeFileSync(cssFile, css);
+			fs.writeFileSync(getCssFilePath(), css);
 
 			done();
+		}
+
+		/**
+		 * Gets the codepoints from the set filepath in o.codepointsFile
+		 */
+		function readCodepointsFromFile(){
+			if (!o.codepointsFile) return {};
+			if (!fs.existsSync(o.codepointsFile)){
+				logger.verbose('Codepoints file not found');
+				return {};
+			}
+
+			var buffer = fs.readFileSync(o.codepointsFile);
+			return JSON.parse(buffer.toString());
+		}
+
+		/**
+		 * Saves the codespoints to the set file
+		 */
+		function saveCodepointsToFile(){
+			if (!o.codepointsFile) return;
+			var codepointsToString = JSON.stringify(o.codepoints);
+			fs.writeFile(o.codepointsFile, codepointsToString, function(err) {
+				if (err){
+					logger.error(err.message);
+				}
+				else {
+					logger.verbose('Codepoints saved to file "'+ o.codepointsFile+'".');
+				}
+			});
 		}
 
 		/**
@@ -245,7 +394,10 @@ module.exports = function(grunt) {
 		 * @param {Function} done
 		 */
 		function generateDemoHtml(done) {
-			if (!o.htmlDemo) return done();
+			if (!o.htmlDemo) {
+				done();
+				return;
+			}
 
 			// HTML should not contain relative paths
 			// If some styles was not included in CSS we should include them in HTML to properly render icons
@@ -267,11 +419,10 @@ module.exports = function(grunt) {
 
 			// Generate HTML
 			var demoTemplate = readTemplate(o.htmlDemoTemplate, 'demo', '.html');
-			var demoFile = path.join(o.destHtml, o.fontBaseName + '.html');
 			var demo = renderTemplate(demoTemplate, htmlContext);
 
 			// Save file
-			fs.writeFileSync(demoFile, demo);
+			fs.writeFileSync(getDemoFilePath(), demo);
 
 			done();
 		}
@@ -405,7 +556,7 @@ module.exports = function(grunt) {
 		 * @return {String}
 		 */
 		function generateFontSrc(type, font) {
-			var filename = template(o.fontName + font.ext, o);
+			var filename = template(o.fontFilename + font.ext, o);
 
 			var url;
 			if (font.embeddable && has(o.embed, type)) {
@@ -413,6 +564,12 @@ module.exports = function(grunt) {
 			}
 			else {
 				url = o.relativeFontPath + filename;
+				if (o.addHashes) {
+					if (url.indexOf('#iefix') === -1) {  // Do not add hashes for OldIE
+						// Put hash at the end of an URL or before #hash
+						url = url.replace(/(#|$)/, '?' + o.hash + '$1');
+					}
+				}
 			}
 
 			var src = 'url("' + url + '")';
@@ -431,7 +588,7 @@ module.exports = function(grunt) {
 		 */
 		function readTemplate(template, syntax, ext, optional) {
 			var filename = template
-				? path.resolve(template.replace(/\.[^\\\/.]+$/, '') + ext)
+				? path.resolve(template.replace(path.extname(template), ext))
 				: path.join(__dirname, 'templates/' + syntax + ext)
 			;
 			if (fs.existsSync(filename)) {
@@ -462,15 +619,6 @@ module.exports = function(grunt) {
 		}
 
 		/**
-		 * Return list of generated font files
-		 *
-		 * @return {Array}
-		 */
-		function generatedFontFiles() {
-			return glob.sync(path.join(o.dest, o.fontBaseName + wf.fontFileMask));
-		}
-
-		/**
 		 * Basic template function: replaces {variables}
 		 *
 		 * @param {Template} tmpl Template code
@@ -491,6 +639,65 @@ module.exports = function(grunt) {
 		 */
 		function classnameize(str) {
 			return _s.trim(str).replace(/\s+/g, '-');
+		}
+
+		/**
+		 * Return path of CSS file.
+		 *
+		 * @return {String}
+		 */
+		function getCssFilePath() {
+			var cssFilePrefix = option(wf.cssFilePrefixes, o.stylesheet);
+			return path.join(o.destCss, cssFilePrefix + o.fontBaseName + '.' + o.stylesheet);
+		}
+
+		/**
+		 * Return path of HTML demo file or `null` if its generation was disabled.
+		 *
+		 * @return {String}
+		 */
+		function getDemoFilePath() {
+			if (!o.htmlDemo) return null;
+			return path.join(o.destHtml, o.fontBaseName + '.html');
+		}
+
+		/**
+		 * Save hash to cache file.
+		 *
+		 * @param {String} name Task name (webfont).
+		 * @param {String} target Task target name.
+		 * @param {String} hash Hash.
+		 */
+		function saveHash(name, target, hash) {
+			var filepath = getHashPath(name, target);
+			mkdirp.sync(path.dirname(filepath));
+			fs.writeFileSync(filepath, hash);
+		}
+
+		/**
+		 * Read hash from cache file or `null` if file don’t exist.
+		 *
+		 * @param {String} name Task name (webfont).
+		 * @param {String} target Task target name.
+		 * @return {String}
+		 */
+		function readHash(name, target) {
+			var filepath = getHashPath(name, target);
+			if (fs.existsSync(filepath)) {
+				return fs.readFileSync(filepath, 'utf8');
+			}
+			return null;
+		}
+
+		/**
+		 * Return path to cache file.
+		 *
+		 * @param {String} name Task name (webfont).
+		 * @param {String} target Task target name.
+		 * @return {String}
+		 */
+		function getHashPath(name, target) {
+			return path.join(o.cache, name, target, 'hash');
 		}
 	});
 };
