@@ -92,7 +92,7 @@ module.exports = function(grunt) {
 			fontHeight: options.fontHeight !== undefined ? options.fontHeight : 512,
 			descent: options.descent !== undefined ? options.descent : 64,
 			cache: options.cache || path.join(__dirname, '..', '.cache'),
-			callback: options.callback
+			callback: options.callback,
 			comment: options.comment,
 			copyright: options.copyright
 		};
